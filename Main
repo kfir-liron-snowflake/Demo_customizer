@@ -13,8 +13,12 @@ if 'node_counter' not in st.session_state:
 if 'selected_connection' not in st.session_state:
     st.session_state.selected_connection = {'from': None, 'to': None}
 
-# Page configuration
-st.set_page_config(page_title="Visual Pipeline Builder", layout="wide")
+# Page configuration - Ensure wide layout
+st.set_page_config(
+    page_title="Visual Pipeline Builder", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 st.title("🔧 Visual Pipeline Builder")
 st.subheader("Build Your Data Pipeline Visually")
@@ -127,36 +131,97 @@ with st.sidebar:
     st.metric("Total Nodes", len(st.session_state.nodes))
     st.metric("Connections", len(st.session_state.edges))
 
-# Add custom CSS to override Streamlit's container constraints
+# AGGRESSIVE CSS to override ALL possible Streamlit width constraints
 st.markdown("""
 <style>
-    .main .block-container {
+    /* NUCLEAR OPTION: Override every possible Streamlit container */
+    .main .block-container,
+    .block-container,
+    div[data-testid="stMainBlockContainer"],
+    div[data-testid="block-container"],
+    .main,
+    section.main,
+    .stApp .main,
+    .css-18e3th9,
+    .css-1d391kg,
+    .css-12oz5g7,
+    .css-1y4p8pa {
         max-width: none !important;
-        padding-left: 2rem !important;
-        padding-right: 2rem !important;
+        width: 100% !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
     }
     
-    .stApp > div:first-child {
-        overflow-x: auto;
+    /* Force full viewport width */
+    .stApp,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stApp"] {
+        max-width: 100vw !important;
+        width: 100vw !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }
     
+    /* Target ALL possible content containers */
+    div[data-testid="stMarkdownContainer"],
+    div[data-testid="stMarkdown"],
+    .stMarkdown,
+    .stHTML,
+    div[class*="css-"],
+    div[class*="block"],
+    div[class*="container"] {
+        max-width: none !important;
+        width: 100% !important;
+    }
+    
+    /* Canvas specific overrides */
     #pipeline-canvas-container {
-        width: 100vw;
-        max-width: calc(100vw - 4rem);
-        margin: 0 auto;
+        width: 100vw !important;
+        max-width: calc(100vw - 20rem) !important; /* Account for sidebar */
+        margin: 0 !important;
+        padding: 0 !important;
+        position: relative !important;
+        left: 0 !important;
+    }
+    
+    #pipeline-canvas {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 800px !important;
+        box-sizing: border-box !important;
+    }
+    
+    /* Override iframe constraints */
+    iframe,
+    .stComponentsIframe iframe {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+    
+    /* Remove any overflow hidden that might crop content */
+    * {
+        overflow-x: visible !important;
+    }
+    
+    /* Ensure text is not cropped */
+    h1, h2, h3, p, div {
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Main content area - Full width canvas
-st.markdown("### 🎨 Pipeline Canvas")
+# Use wide container for maximum width utilization  
+with st.container():
+    st.markdown("### 🎨 Pipeline Canvas")
+    
+    # Add session state for node positions if dragged
+    if 'dragged_positions' not in st.session_state:
+        st.session_state.dragged_positions = {}
 
-# Add session state for node positions if dragged
-if 'dragged_positions' not in st.session_state:
-    st.session_state.dragged_positions = {}
-
-# Custom HTML/CSS/JS for the canvas with drag functionality
-canvas_html = f"""
+    # Custom HTML/CSS/JS for the canvas with drag functionality
+    canvas_html = f"""
 <div id="pipeline-canvas-container">
     <div id="pipeline-canvas" style="
         width: 100%; 
@@ -166,7 +231,9 @@ canvas_html = f"""
         background: linear-gradient(90deg, #f8f9fa 0%, #e9ecef 100%);
         border-radius: 10px;
         overflow: hidden;
-        min-width: 1400px;
+        min-width: 800px;
+        max-width: 100%;
+        box-sizing: border-box;
     ">
     <div style="
         position: absolute; 
@@ -393,7 +460,105 @@ canvas_html = f"""
 </script>
 """
 
-components.html(canvas_html, height=620)
+    components.html(canvas_html, height=620)
+
+# AGGRESSIVE JavaScript to force full width after page load
+st.markdown("""
+<script>
+function forceFullWidth() {
+    console.log('Forcing full width...');
+    
+    // Target all possible Streamlit containers
+    const selectors = [
+        '.main .block-container',
+        '.block-container', 
+        '[data-testid="stMainBlockContainer"]',
+        '.main',
+        'section.main',
+        '.stApp .main',
+        '.css-18e3th9',
+        '.css-1d391kg', 
+        '.css-12oz5g7',
+        '.css-1y4p8pa',
+        '[data-testid="stMarkdownContainer"]',
+        '.stMarkdown',
+        '.stHTML'
+    ];
+    
+    selectors.forEach(selector => {
+        const elements = document.querySelectorAll(selector);
+        elements.forEach(el => {
+            el.style.maxWidth = 'none';
+            el.style.width = '100%';
+            console.log('Applied width override to:', selector);
+        });
+    });
+    
+    // Force canvas container to be full width
+    const canvasContainer = document.getElementById('pipeline-canvas-container');
+    const canvas = document.getElementById('pipeline-canvas');
+    
+    if (canvasContainer) {
+        // Calculate available width (viewport minus sidebar)
+        const sidebarWidth = document.querySelector('.css-1d391kg')?.offsetWidth || 300;
+        const availableWidth = window.innerWidth - sidebarWidth - 40;
+        
+        canvasContainer.style.width = availableWidth + 'px';
+        canvasContainer.style.maxWidth = availableWidth + 'px';
+        console.log('Canvas container width set to:', availableWidth);
+        
+        if (canvas) {
+            canvas.style.width = '100%';
+            canvas.style.maxWidth = '100%';
+            console.log('Canvas width set to 100%');
+        }
+    }
+    
+    // Also check for text truncation and fix
+    const textElements = document.querySelectorAll('h1, h2, h3, p, div, span');
+    textElements.forEach(el => {
+        if (el.style.textOverflow === 'ellipsis') {
+            el.style.textOverflow = 'clip';
+            el.style.whiteSpace = 'normal';
+            el.style.overflow = 'visible';
+        }
+    });
+}
+
+// Run multiple times to ensure it works
+window.addEventListener('load', function() {
+    forceFullWidth();
+    setTimeout(forceFullWidth, 100);
+    setTimeout(forceFullWidth, 500);
+    setTimeout(forceFullWidth, 1000);
+    setTimeout(forceFullWidth, 2000);
+});
+
+// Also run on window resize
+window.addEventListener('resize', forceFullWidth);
+
+// Monitor for Streamlit updates and reapply
+const observer = new MutationObserver(function(mutations) {
+    let shouldUpdate = false;
+    mutations.forEach(function(mutation) {
+        if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+            shouldUpdate = true;
+        }
+    });
+    if (shouldUpdate) {
+        setTimeout(forceFullWidth, 100);
+    }
+});
+
+// Start observing
+setTimeout(() => {
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+}, 1000);
+</script>
+""", unsafe_allow_html=True)
 
 
 # Pipeline Overview - Now below the canvas
