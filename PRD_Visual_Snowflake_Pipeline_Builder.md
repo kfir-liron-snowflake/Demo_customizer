@@ -2,7 +2,7 @@
 ## Visual Snowflake Pipeline Builder
 
 **Document Version:** 1.0  
-**Last Updated:** September 2024  
+**Last Updated:** September 14, 2025  
 **Owner:** Data Platform Team  
 
 ---
