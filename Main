@@ -92,6 +92,12 @@ with st.sidebar:
         st.session_state.nodes = []
         st.session_state.edges = []
         st.session_state.node_counter = 0
+        st.session_state.dragged_positions = {}
+        st.rerun()
+    
+    if st.button("🔄 Reset All Positions"):
+        st.session_state.dragged_positions = {}
+        st.success("All node positions reset to original locations!")
         st.rerun()
     
     if st.button("💾 Export Pipeline"):
@@ -121,117 +127,320 @@ with st.sidebar:
     st.metric("Total Nodes", len(st.session_state.nodes))
     st.metric("Connections", len(st.session_state.edges))
 
-# Main content area
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    st.markdown("### 🎨 Pipeline Canvas")
+# Add custom CSS to override Streamlit's container constraints
+st.markdown("""
+<style>
+    .main .block-container {
+        max-width: none !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+    }
     
-    # Custom HTML/CSS/JS for the canvas
-    canvas_html = f"""
+    .stApp > div:first-child {
+        overflow-x: auto;
+    }
+    
+    #pipeline-canvas-container {
+        width: 100vw;
+        max-width: calc(100vw - 4rem);
+        margin: 0 auto;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Main content area - Full width canvas
+st.markdown("### 🎨 Pipeline Canvas")
+
+# Add session state for node positions if dragged
+if 'dragged_positions' not in st.session_state:
+    st.session_state.dragged_positions = {}
+
+# Custom HTML/CSS/JS for the canvas with drag functionality
+canvas_html = f"""
+<div id="pipeline-canvas-container">
     <div id="pipeline-canvas" style="
         width: 100%; 
-        height: 500px; 
+        height: 600px; 
         border: 2px dashed #ccc; 
         position: relative; 
         background: linear-gradient(90deg, #f8f9fa 0%, #e9ecef 100%);
         border-radius: 10px;
         overflow: hidden;
+        min-width: 1400px;
     ">
-        <div style="
-            position: absolute; 
-            top: 50%; 
-            left: 50%; 
-            transform: translate(-50%, -50%); 
-            text-align: center; 
-            color: #6c757d;
-            font-size: 18px;
-        " id="canvas-message">
-            {'👈 Add components from the sidebar to start building!' if not st.session_state.nodes else ''}
-        </div>
-        
-        <!-- SVG for connections -->
-        <svg width="100%" height="100%" style="position: absolute; top: 0; left: 0; z-index: 1;">
-            {chr(10).join([f'''
-            <defs>
-                <marker id="arrowhead" markerWidth="10" markerHeight="7" 
-                        refX="9" refY="3.5" orient="auto">
-                    <polygon points="0 0, 10 3.5, 0 7" fill="#666" />
-                </marker>
-            </defs>
-            ''' if st.session_state.edges else ''])}
-            
-            {chr(10).join([f'''
-            <line x1="{next((n['x'] + 60 for n in st.session_state.nodes if n['id'] == edge['from']), 0)}" 
-                  y1="{next((n['y'] + 30 for n in st.session_state.nodes if n['id'] == edge['from']), 0)}" 
-                  x2="{next((n['x'] for n in st.session_state.nodes if n['id'] == edge['to']), 0)}" 
-                  y2="{next((n['y'] + 30 for n in st.session_state.nodes if n['id'] == edge['to']), 0)}" 
-                  stroke="#666" stroke-width="2" marker-end="url(#arrowhead)" />
-            ''' for edge in st.session_state.edges])}
-        </svg>
-        
-        <!-- Nodes -->
-        {chr(10).join([f'''
-        <div style="
-            position: absolute;
-            left: {node['x']}px;
-            top: {node['y']}px;
-            width: 120px;
-            height: 60px;
-            background: {node['color']};
-            color: white;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            font-size: 12px;
-            font-weight: bold;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-            cursor: move;
-            z-index: 2;
-            border: 2px solid rgba(255,255,255,0.3);
-        " 
-        onclick="selectNode('{node['id']}')"
-        title="{node['label']} - Click to select"
-        >
-            {node['label']}
-        </div>
-        ''' for node in st.session_state.nodes])}
+    <div style="
+        position: absolute; 
+        top: 50%; 
+        left: 50%; 
+        transform: translate(-50%, -50%); 
+        text-align: center; 
+        color: #6c757d;
+        font-size: 18px;
+    " id="canvas-message">
+        {'👈 Add components from the sidebar to start building!' if not st.session_state.nodes else ''}
     </div>
     
-    <script>
-        function selectNode(nodeId) {{
-            // Simple node selection feedback
-            alert('Selected node: ' + nodeId);
-        }}
-    </script>
-    """
+    <!-- SVG for connections -->
+    <svg id="connections-svg" width="100%" height="100%" style="position: absolute; top: 0; left: 0; z-index: 1;">
+        {chr(10).join([f'''
+        <defs>
+            <marker id="arrowhead" markerWidth="10" markerHeight="7" 
+                    refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#666" />
+            </marker>
+        </defs>
+        ''' if st.session_state.edges else ''])}
+        
+            {chr(10).join([f'''
+            <line id="edge_{edge['id']}" 
+                  x1="{st.session_state.dragged_positions.get(edge['from'], {}).get('x', next((n['x'] for n in st.session_state.nodes if n['id'] == edge['from']), 0)) + 60}" 
+                  y1="{st.session_state.dragged_positions.get(edge['from'], {}).get('y', next((n['y'] for n in st.session_state.nodes if n['id'] == edge['from']), 0)) + 30}" 
+                  x2="{st.session_state.dragged_positions.get(edge['to'], {}).get('x', next((n['x'] for n in st.session_state.nodes if n['id'] == edge['to']), 0))}" 
+                  y2="{st.session_state.dragged_positions.get(edge['to'], {}).get('y', next((n['y'] for n in st.session_state.nodes if n['id'] == edge['to']), 0)) + 30}" 
+                  stroke="#666" stroke-width="2" marker-end="url(#arrowhead)" />
+            ''' for edge in st.session_state.edges])}
+    </svg>
     
-    components.html(canvas_html, height=520)
+        <!-- Nodes -->
+        {chr(10).join([f'''
+    <div id="{node['id']}" 
+         class="draggable-node" 
+         style="
+        position: absolute;
+        left: {st.session_state.dragged_positions.get(node['id'], {}).get('x', node['x'])}px;
+        top: {st.session_state.dragged_positions.get(node['id'], {}).get('y', node['y'])}px;
+        width: 120px;
+        height: 60px;
+        background: {node['color']};
+        color: white;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        font-size: 12px;
+        font-weight: bold;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        cursor: move;
+        z-index: 2;
+        border: 2px solid rgba(255,255,255,0.3);
+        user-select: none;
+        transition: box-shadow 0.2s ease;
+    " 
+    onmousedown="startDrag(event, '{node['id']}')"
+    title="{node['label']} - Drag to move"
+    >
+        {node['label']}
+    </div>
+    ''' for node in st.session_state.nodes])}
 
-with col2:
-    st.markdown("### 📋 Pipeline Overview")
+    <!-- Hidden inputs to store node positions -->
+    {chr(10).join([f'''
+    <input type="hidden" id="pos_{node['id']}_x" value="{st.session_state.dragged_positions.get(node['id'], {}).get('x', node['x'])}" />
+    <input type="hidden" id="pos_{node['id']}_y" value="{st.session_state.dragged_positions.get(node['id'], {}).get('y', node['y'])}" />
+    ''' for node in st.session_state.nodes])}
+</div>
+</div>
+
+<script>
+    let isDragging = false;
+    let currentNode = null;
+    let startX, startY;
+    let nodeStartX, nodeStartY;
+
+    function startDrag(e, nodeId) {{
+        e.preventDefault();
+        isDragging = true;
+        currentNode = document.getElementById(nodeId);
+        
+        // Get initial mouse position
+        startX = e.clientX;
+        startY = e.clientY;
+        
+        // Get initial node position
+        nodeStartX = parseInt(currentNode.style.left);
+        nodeStartY = parseInt(currentNode.style.top);
+        
+        // Add visual feedback
+        currentNode.style.boxShadow = '0 8px 16px rgba(0,0,0,0.4)';
+        currentNode.style.transform = 'scale(1.05)';
+        
+        // Add event listeners
+        document.addEventListener('mousemove', drag);
+        document.addEventListener('mouseup', stopDrag);
+    }}
+
+    function drag(e) {{
+        if (!isDragging || !currentNode) return;
+        
+        e.preventDefault();
+        
+        // Calculate new position
+        const deltaX = e.clientX - startX;
+        const deltaY = e.clientY - startY;
+        
+        let newX = nodeStartX + deltaX;
+        let newY = nodeStartY + deltaY;
+        
+        // Keep node within canvas bounds
+        const canvas = document.getElementById('pipeline-canvas');
+        const canvasRect = canvas.getBoundingClientRect();
+        
+        newX = Math.max(0, Math.min(newX, canvasRect.width - 120));
+        newY = Math.max(0, Math.min(newY, canvasRect.height - 60));
+        
+        // Update node position
+        currentNode.style.left = newX + 'px';
+        currentNode.style.top = newY + 'px';
+        
+        // Store position in localStorage for persistence
+        localStorage.setItem(`pos_${{currentNode.id}}_x`, newX);
+        localStorage.setItem(`pos_${{currentNode.id}}_y`, newY);
+        
+        // Update hidden inputs
+        const xInput = document.getElementById(`pos_${{currentNode.id}}_x`);
+        const yInput = document.getElementById(`pos_${{currentNode.id}}_y`);
+        if (xInput) xInput.value = newX;
+        if (yInput) yInput.value = newY;
+        
+        // Update connections
+        updateConnections();
+    }}
+
+    function stopDrag(e) {{
+        if (!isDragging || !currentNode) return;
+        
+        isDragging = false;
+        
+        // Remove visual feedback
+        currentNode.style.boxShadow = '0 4px 8px rgba(0,0,0,0.2)';
+        currentNode.style.transform = 'scale(1)';
+        
+        // Get final position
+        const finalX = parseInt(currentNode.style.left);
+        const finalY = parseInt(currentNode.style.top);
+        
+        // Store in localStorage for persistence across re-renders
+        localStorage.setItem(`pos_${{currentNode.id}}_x`, finalX);
+        localStorage.setItem(`pos_${{currentNode.id}}_y`, finalY);
+        
+        currentNode = null;
+        
+        // Remove event listeners
+        document.removeEventListener('mousemove', drag);
+        document.removeEventListener('mouseup', stopDrag);
+    }}
     
-    if st.session_state.nodes:
+    // On page load, restore positions from localStorage
+    window.addEventListener('load', function() {{
+        const nodes = {json.dumps([node['id'] for node in st.session_state.nodes])};
+        nodes.forEach(nodeId => {{
+            const storedX = localStorage.getItem(`pos_${{nodeId}}_x`);
+            const storedY = localStorage.getItem(`pos_${{nodeId}}_y`);
+            
+            if (storedX && storedY) {{
+                const node = document.getElementById(nodeId);
+                const xInput = document.getElementById(`pos_${{nodeId}}_x`);
+                const yInput = document.getElementById(`pos_${{nodeId}}_y`);
+                
+                if (node) {{
+                    node.style.left = storedX + 'px';
+                    node.style.top = storedY + 'px';
+                }}
+                if (xInput) xInput.value = storedX;
+                if (yInput) yInput.value = storedY;
+            }}
+        }});
+        
+        // Update connections after restoring positions
+        setTimeout(updateConnections, 100);
+    }});
+
+    function updateConnections() {{
+        // Update all connection lines when nodes are moved
+        const edges = {json.dumps(st.session_state.edges)};
+        const nodes = {json.dumps(st.session_state.nodes)};
+        
+        edges.forEach(edge => {{
+            const line = document.getElementById('edge_' + edge.id);
+            if (line) {{
+                const fromNode = document.getElementById(edge.from);
+                const toNode = document.getElementById(edge.to);
+                
+                if (fromNode && toNode) {{
+                    const fromRect = fromNode.getBoundingClientRect();
+                    const toRect = toNode.getBoundingClientRect();
+                    const canvasRect = document.getElementById('pipeline-canvas').getBoundingClientRect();
+                    
+                    const x1 = fromRect.left - canvasRect.left + 60;
+                    const y1 = fromRect.top - canvasRect.top + 30;
+                    const x2 = toRect.left - canvasRect.left;
+                    const y2 = toRect.top - canvasRect.top + 30;
+                    
+                    line.setAttribute('x1', x1);
+                    line.setAttribute('y1', y1);
+                    line.setAttribute('x2', x2);
+                    line.setAttribute('y2', y2);
+                }}
+            }}
+        }});
+    }}
+    
+    // Prevent text selection during drag
+    document.addEventListener('selectstart', function(e) {{
+        if (isDragging) e.preventDefault();
+    }});
+</script>
+"""
+
+components.html(canvas_html, height=620)
+
+
+# Pipeline Overview - Now below the canvas
+st.markdown("---")
+st.markdown("### 📋 Pipeline Overview")
+
+if st.session_state.nodes:
+    # Create columns for better organization of overview content
+    col_nodes, col_connections = st.columns([1, 1])
+    
+    with col_nodes:
         st.markdown("**Nodes:**")
         for i, node in enumerate(st.session_state.nodes, 1):
+            # Get current position (dragged or original)
+            current_x = st.session_state.dragged_positions.get(node['id'], {}).get('x', node['x'])
+            current_y = st.session_state.dragged_positions.get(node['id'], {}).get('y', node['y'])
+            
             with st.expander(f"{i}. {node['label']}", expanded=False):
                 st.write(f"**ID:** {node['id']}")
                 st.write(f"**Type:** {node['type']}")
-                st.write(f"**Position:** ({node['x']}, {node['y']})")
+                st.write(f"**Position:** ({current_x}, {current_y})")
+                if st.session_state.dragged_positions.get(node['id']):
+                    st.info("🖱️ Position modified by dragging")
                 
-                # Delete button for each node
-                if st.button(f"❌ Delete", key=f"delete_{node['id']}"):
-                    # Remove node
-                    st.session_state.nodes = [n for n in st.session_state.nodes if n['id'] != node['id']]
-                    # Remove associated edges
-                    st.session_state.edges = [e for e in st.session_state.edges 
-                                            if e['from'] != node['id'] and e['to'] != node['id']]
-                    st.rerun()
-        
+                # Action buttons for each node  
+                col_del, col_reset = st.columns(2)
+                with col_del:
+                    if st.button(f"❌ Delete", key=f"delete_{node['id']}"):
+                        # Remove node and its dragged position
+                        st.session_state.nodes = [n for n in st.session_state.nodes if n['id'] != node['id']]
+                        # Remove associated edges
+                        st.session_state.edges = [e for e in st.session_state.edges 
+                                                if e['from'] != node['id'] and e['to'] != node['id']]
+                        # Remove dragged position
+                        if node['id'] in st.session_state.dragged_positions:
+                            del st.session_state.dragged_positions[node['id']]
+                        st.rerun()
+                
+                with col_reset:
+                    if st.button(f"🔄 Reset Pos", key=f"reset_{node['id']}"):
+                        # Reset node position to original
+                        if node['id'] in st.session_state.dragged_positions:
+                            del st.session_state.dragged_positions[node['id']]
+                        st.rerun()
+    
+    with col_connections:
         if st.session_state.edges:
-            st.markdown("---")
             st.markdown("**Connections:**")
             for edge in st.session_state.edges:
                 from_node = next((n for n in st.session_state.nodes if n['id'] == edge['from']), None)
@@ -239,15 +448,17 @@ with col2:
                 
                 if from_node and to_node:
                     st.write(f"🔗 {from_node['label']} → {to_node['label']}")
-    else:
-        st.info("No components added yet")
-        st.markdown("""
-        **Getting Started:**
-        1. 📦 Add components using the sidebar
-        2. 🔗 Connect nodes to create data flow
-        3. 💾 Export your pipeline when ready
-        4. 🔧 Click nodes to select them
-        """)
+        else:
+            st.info("No connections yet")
+else:
+    st.info("No components added yet")
+    st.markdown("""
+    **Getting Started:**
+    1. 📦 Add components using the sidebar
+    2. 🔗 Connect nodes to create data flow  
+    3. 💾 Export your pipeline when ready
+    4. 🖱️ Drag nodes around the canvas to reposition them
+    """)
 
 # Footer
 st.markdown("---")
