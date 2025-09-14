@@ -1,0 +1,297 @@
+import streamlit as st
+import streamlit.components.v1 as components
+import json
+import uuid
+
+# Initialize session state
+if 'nodes' not in st.session_state:
+    st.session_state.nodes = []
+if 'edges' not in st.session_state:
+    st.session_state.edges = []
+if 'node_counter' not in st.session_state:
+    st.session_state.node_counter = 0
+if 'selected_connection' not in st.session_state:
+    st.session_state.selected_connection = {'from': None, 'to': None}
+
+# Page configuration
+st.set_page_config(page_title="Visual Pipeline Builder", layout="wide")
+
+st.title("🔧 Visual Pipeline Builder")
+st.subheader("Build Your Data Pipeline Visually")
+
+# Sidebar for controls
+with st.sidebar:
+    st.header("📦 Pipeline Controls")
+    
+    # Component types
+    component_types = {
+        "Data Source": {"color": "#4CAF50", "icon": "🗃️"},
+        "Transform": {"color": "#2196F3", "icon": "⚙️"},
+        "Filter": {"color": "#FF9800", "icon": "🔍"},
+        "Aggregate": {"color": "#9C27B0", "icon": "📊"},
+        "Output": {"color": "#F44336", "icon": "💾"}
+    }
+    
+    st.markdown("### Add Components")
+    
+    # Create buttons for each component type
+    for comp_type, style in component_types.items():
+        if st.button(f"{style['icon']} Add {comp_type}", key=f"add_{comp_type}"):
+            st.session_state.node_counter += 1
+            new_node = {
+                'id': f"node_{st.session_state.node_counter}",
+                'label': f"{comp_type} #{st.session_state.node_counter}",
+                'type': comp_type,
+                'color': style['color'],
+                'x': 100 + (st.session_state.node_counter * 30),
+                'y': 100 + (st.session_state.node_counter * 30)
+            }
+            st.session_state.nodes.append(new_node)
+            st.rerun()
+    
+    st.markdown("---")
+    
+    # Connection controls
+    st.markdown("### Connect Nodes")
+    
+    if len(st.session_state.nodes) >= 2:
+        node_options = {f"{node['label']} ({node['id']})": node['id'] for node in st.session_state.nodes}
+        
+        from_node = st.selectbox("From Node:", list(node_options.keys()), key="from_node")
+        to_node = st.selectbox("To Node:", list(node_options.keys()), key="to_node")
+        
+        if st.button("🔗 Connect Nodes"):
+            from_id = node_options[from_node]
+            to_id = node_options[to_node]
+            
+            if from_id != to_id:
+                # Check if connection already exists
+                existing = any(edge['from'] == from_id and edge['to'] == to_id 
+                             for edge in st.session_state.edges)
+                if not existing:
+                    new_edge = {
+                        'id': f"{from_id}_to_{to_id}",
+                        'from': from_id,
+                        'to': to_id
+                    }
+                    st.session_state.edges.append(new_edge)
+                    st.rerun()
+                else:
+                    st.warning("Connection already exists!")
+            else:
+                st.warning("Cannot connect a node to itself!")
+    else:
+        st.info("Add at least 2 nodes to create connections")
+    
+    st.markdown("---")
+    
+    # Pipeline management
+    st.markdown("### Pipeline Management")
+    
+    if st.button("🗑️ Clear All"):
+        st.session_state.nodes = []
+        st.session_state.edges = []
+        st.session_state.node_counter = 0
+        st.rerun()
+    
+    if st.button("💾 Export Pipeline"):
+        if st.session_state.nodes:
+            pipeline_data = {
+                "nodes": st.session_state.nodes,
+                "edges": st.session_state.edges,
+                "metadata": {
+                    "total_nodes": len(st.session_state.nodes),
+                    "total_edges": len(st.session_state.edges),
+                    "created": "now"
+                }
+            }
+            st.success("Pipeline exported!")
+            st.download_button(
+                label="📄 Download JSON",
+                data=json.dumps(pipeline_data, indent=2),
+                file_name="pipeline.json",
+                mime="application/json"
+            )
+        else:
+            st.warning("No pipeline to export!")
+    
+    # Pipeline stats
+    st.markdown("---")
+    st.markdown("### Pipeline Stats")
+    st.metric("Total Nodes", len(st.session_state.nodes))
+    st.metric("Connections", len(st.session_state.edges))
+
+# Main content area
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    st.markdown("### 🎨 Pipeline Canvas")
+    
+    # Custom HTML/CSS/JS for the canvas
+    canvas_html = f"""
+    <div id="pipeline-canvas" style="
+        width: 100%; 
+        height: 500px; 
+        border: 2px dashed #ccc; 
+        position: relative; 
+        background: linear-gradient(90deg, #f8f9fa 0%, #e9ecef 100%);
+        border-radius: 10px;
+        overflow: hidden;
+    ">
+        <div style="
+            position: absolute; 
+            top: 50%; 
+            left: 50%; 
+            transform: translate(-50%, -50%); 
+            text-align: center; 
+            color: #6c757d;
+            font-size: 18px;
+        " id="canvas-message">
+            {'👈 Add components from the sidebar to start building!' if not st.session_state.nodes else ''}
+        </div>
+        
+        <!-- SVG for connections -->
+        <svg width="100%" height="100%" style="position: absolute; top: 0; left: 0; z-index: 1;">
+            {chr(10).join([f'''
+            <defs>
+                <marker id="arrowhead" markerWidth="10" markerHeight="7" 
+                        refX="9" refY="3.5" orient="auto">
+                    <polygon points="0 0, 10 3.5, 0 7" fill="#666" />
+                </marker>
+            </defs>
+            ''' if st.session_state.edges else ''])}
+            
+            {chr(10).join([f'''
+            <line x1="{next((n['x'] + 60 for n in st.session_state.nodes if n['id'] == edge['from']), 0)}" 
+                  y1="{next((n['y'] + 30 for n in st.session_state.nodes if n['id'] == edge['from']), 0)}" 
+                  x2="{next((n['x'] for n in st.session_state.nodes if n['id'] == edge['to']), 0)}" 
+                  y2="{next((n['y'] + 30 for n in st.session_state.nodes if n['id'] == edge['to']), 0)}" 
+                  stroke="#666" stroke-width="2" marker-end="url(#arrowhead)" />
+            ''' for edge in st.session_state.edges])}
+        </svg>
+        
+        <!-- Nodes -->
+        {chr(10).join([f'''
+        <div style="
+            position: absolute;
+            left: {node['x']}px;
+            top: {node['y']}px;
+            width: 120px;
+            height: 60px;
+            background: {node['color']};
+            color: white;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            font-size: 12px;
+            font-weight: bold;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            cursor: move;
+            z-index: 2;
+            border: 2px solid rgba(255,255,255,0.3);
+        " 
+        onclick="selectNode('{node['id']}')"
+        title="{node['label']} - Click to select"
+        >
+            {node['label']}
+        </div>
+        ''' for node in st.session_state.nodes])}
+    </div>
+    
+    <script>
+        function selectNode(nodeId) {{
+            // Simple node selection feedback
+            alert('Selected node: ' + nodeId);
+        }}
+    </script>
+    """
+    
+    components.html(canvas_html, height=520)
+
+with col2:
+    st.markdown("### 📋 Pipeline Overview")
+    
+    if st.session_state.nodes:
+        st.markdown("**Nodes:**")
+        for i, node in enumerate(st.session_state.nodes, 1):
+            with st.expander(f"{i}. {node['label']}", expanded=False):
+                st.write(f"**ID:** {node['id']}")
+                st.write(f"**Type:** {node['type']}")
+                st.write(f"**Position:** ({node['x']}, {node['y']})")
+                
+                # Delete button for each node
+                if st.button(f"❌ Delete", key=f"delete_{node['id']}"):
+                    # Remove node
+                    st.session_state.nodes = [n for n in st.session_state.nodes if n['id'] != node['id']]
+                    # Remove associated edges
+                    st.session_state.edges = [e for e in st.session_state.edges 
+                                            if e['from'] != node['id'] and e['to'] != node['id']]
+                    st.rerun()
+        
+        if st.session_state.edges:
+            st.markdown("---")
+            st.markdown("**Connections:**")
+            for edge in st.session_state.edges:
+                from_node = next((n for n in st.session_state.nodes if n['id'] == edge['from']), None)
+                to_node = next((n for n in st.session_state.nodes if n['id'] == edge['to']), None)
+                
+                if from_node and to_node:
+                    st.write(f"🔗 {from_node['label']} → {to_node['label']}")
+    else:
+        st.info("No components added yet")
+        st.markdown("""
+        **Getting Started:**
+        1. 📦 Add components using the sidebar
+        2. 🔗 Connect nodes to create data flow
+        3. 💾 Export your pipeline when ready
+        4. 🔧 Click nodes to select them
+        """)
+
+# Footer
+st.markdown("---")
+st.markdown("### 🚀 Pipeline Execution Preview")
+
+if st.session_state.nodes:
+    execution_order = []
+    
+    # Simple topological sort for execution order
+    # Start with nodes that have no incoming edges
+    remaining_nodes = st.session_state.nodes.copy()
+    remaining_edges = st.session_state.edges.copy()
+    
+    while remaining_nodes:
+        # Find nodes with no incoming edges
+        nodes_with_no_incoming = []
+        for node in remaining_nodes:
+            has_incoming = any(edge['to'] == node['id'] for edge in remaining_edges)
+            if not has_incoming:
+                nodes_with_no_incoming.append(node)
+        
+        if not nodes_with_no_incoming:
+            # Circular dependency or isolated nodes
+            nodes_with_no_incoming = remaining_nodes[:1]
+        
+        # Add to execution order
+        for node in nodes_with_no_incoming:
+            execution_order.append(node['label'])
+            remaining_nodes.remove(node)
+            # Remove edges from this node
+            remaining_edges = [e for e in remaining_edges if e['from'] != node['id']]
+    
+    st.write("**Estimated Execution Order:**")
+    for i, node_label in enumerate(execution_order, 1):
+        st.write(f"{i}. {node_label}")
+else:
+    st.info("Build your pipeline to see execution order")
+
+# Debug section
+with st.expander("🔍 Debug Info"):
+    col_debug1, col_debug2 = st.columns(2)
+    with col_debug1:
+        st.write("**Nodes:**")
+        st.json(st.session_state.nodes)
+    with col_debug2:
+        st.write("**Edges:**")
+        st.json(st.session_state.edges)
